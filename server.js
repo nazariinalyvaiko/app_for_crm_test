@@ -13,6 +13,15 @@ app.use(cors({
 
 app.use(express.json());
 
+// Set Content-Security-Policy headers
+app.use((req, res, next) => {
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'sha256-ieoeWczDHkReVBsRBqaal5AFMlBtNjMzgwKvLqi/tSU=' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https: blob:; font-src 'self' data: https:; connect-src 'self' https:; frame-src 'self' https:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';"
+  );
+  next();
+});
+
 app.post('/api/checkout', (req, res) => {
   const orderData = req.body;
   console.log('Order data:', orderData);
