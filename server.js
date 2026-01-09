@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 app.use(cors({
   origin: '*',
@@ -41,6 +41,12 @@ app.post('/api/checkout', (req, res) => {
   */
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server is running at http://0.0.0.0:${PORT}`);
-});
+// Export for Vercel serverless functions
+module.exports = app;
+
+// Only listen if not in serverless environment
+if (process.env.VERCEL !== '1') {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server is running at http://0.0.0.0:${PORT}`);
+  });
+}
