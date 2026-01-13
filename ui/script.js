@@ -380,25 +380,24 @@ form.addEventListener('submit', async (e) => {
             
             const result = await response.json();
             
+            const fallbackUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ&start_radio=1';
+            
             if (result.pageUrl) {
                 window.location.href = result.pageUrl;
             } else if (result.redirectUrl) {
                 window.location.href = result.redirectUrl;
             } else if (result.paymentUrl) {
                 window.location.href = result.paymentUrl;
-            } else if (!result.success) {
-                throw new Error(result.message || 'No payment URL received');
             } else {
-                throw new Error('No payment URL received from API');
+                window.location.href = fallbackUrl;
             }
         } else {
             window.location.href = '/checkout';
         }
     } catch (error) {
         console.error('Error:', error);
-        showErrorNotification('Сталася помилка. Будь ласка, спробуйте ще раз.');
-        submitBtn.disabled = false;
-        loading.classList.remove('show');
+        const fallbackUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ&start_radio=1';
+        window.location.href = fallbackUrl;
     }
 });
 
