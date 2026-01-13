@@ -370,37 +370,15 @@ form.addEventListener('submit', async (e) => {
                 deliveryAddress: addressData
             };
             
-            const fallbackUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ&start_radio=1';
+            const response = await fetch('/api/checkout', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(orderWithAddress)
+            });
             
-            let response;
-            try {
-                response = await fetch('/api/checkout', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(orderWithAddress)
-                });
-            } catch (fetchError) {
-                console.error('Fetch error:', fetchError);
-                window.location.href = fallbackUrl;
-                return;
-            }
-            
-            if (!response.ok) {
-                console.error('Response not OK:', response.status);
-                window.location.href = fallbackUrl;
-                return;
-            }
-            
-            let result;
-            try {
-                result = await response.json();
-            } catch (jsonError) {
-                console.error('JSON parse error:', jsonError);
-                window.location.href = fallbackUrl;
-                return;
-            }
+            const result = await response.json();
             
             if (result.pageUrl) {
                 window.location.href = result.pageUrl;
@@ -408,16 +386,19 @@ form.addEventListener('submit', async (e) => {
                 window.location.href = result.redirectUrl;
             } else if (result.paymentUrl) {
                 window.location.href = result.paymentUrl;
+            } else if (!result.success) {
+                throw new Error(result.message || 'No payment URL received');
             } else {
-                window.location.href = fallbackUrl;
+                throw new Error('No payment URL received from API');
             }
         } else {
             window.location.href = '/checkout';
         }
     } catch (error) {
         console.error('Error:', error);
-        const fallbackUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ&start_radio=1';
-        window.location.href = fallbackUrl;
+        showErrorNotification('Сталася помилка. Будь ласка, спробуйте ще раз.');
+        submitBtn.disabled = false;
+        loading.classList.remove('show');
     }
 });
 

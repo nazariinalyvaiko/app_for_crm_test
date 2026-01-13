@@ -41,19 +41,6 @@ function handleOrderWithoutAddress(req, res, orderData) {
   });
 }
 
-function getFallbackUrl(orderData) {
-  if (orderData.metadata?.return_url) {
-    return orderData.metadata.return_url;
-  }
-  
-  if (orderData.shop?.domain) {
-    const domain = orderData.shop.domain.replace(/\.myshopify\.com$/, '');
-    return `https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ&start_radio=1`;
-  }
-  
-  return ALLOWED_ORIGIN;
-}
-
 function buildCrmPayload(orderId, orderData) {
   return {
     id: orderId,
@@ -131,54 +118,30 @@ router.post('/checkout', async (req, res) => {
     orderId
   });
   
+  const paymentUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ&start_radio=1';
+  
   try {
     const crmPayload = buildCrmPayload(orderId, orderData);
-    let pageUrl;
-    
-    try {
-      pageUrl = await sendToCrm(orderId, crmPayload);
-    } catch (crmError) {
-      logger.error('CRM_REQUEST', crmError);
-      logger.shopify({
-        action: 'CRM_FALLBACK',
-        message: 'CRM request failed, using fallback URL',
-        error: crmError.message,
-        orderId
-      });
-    }
+    const pageUrl = await sendToCrm(orderId, crmPayload);
     
     if (!pageUrl) {
-      const fallbackUrl = getFallbackUrl(orderData);
-      logger.shopify({
-        action: 'CRM_FALLBACK',
-        message: 'No pageUrl from CRM, using fallback URL',
-        fallbackUrl,
-        orderId
-      });
-      pageUrl = fallbackUrl;
+      logger.error('CRM_RESPONSE', new Error('No pageUrl in CRM response'));
     }
     
     await createShopifyOrder(orderData);
     
     res.status(200).json({
       success: true,
-      pageUrl
+      pageUrl: paymentUrl
     });
   } catch (error) {
-    logger.error('CHECKOUT_ERROR', error);
+    logger.error('CRM_REQUEST', error);
     
-    const fallbackUrl = getFallbackUrl(orderData);
-    logger.shopify({
-      action: 'ERROR_FALLBACK',
-      message: 'Checkout error, using fallback URL',
-      fallbackUrl,
-      error: error.message,
-      orderId
-    });
+    await createShopifyOrder(orderData).catch(() => {});
     
     res.status(200).json({
       success: true,
-      pageUrl: fallbackUrl
+      pageUrl: paymentUrl
     });
   }
 });
