@@ -15,7 +15,7 @@ const CSP_POLICY = [
   "style-src 'self' 'unsafe-inline' https:",
   "img-src 'self' data: https: blob:",
   "font-src 'self' data: https:",
-  "connect-src 'self' https:",
+  "connect-src 'self' https: *",
   "frame-src 'self' https:",
   "object-src 'none'",
   "base-uri 'self'",
@@ -23,10 +23,23 @@ const CSP_POLICY = [
   "frame-ancestors 'none'"
 ].join('; ');
 
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  
+  next();
+});
+
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type']
+  allowedHeaders: ['Content-Type'],
+  credentials: false
 }));
 
 app.use(express.json());
