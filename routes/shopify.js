@@ -1,13 +1,75 @@
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
-const crypto = require('crypto');
 const logger = require('../utils/logger');
 const shopifyService = require('../services/shopify');
+const { extractOrderId, buildAddressUrl, mergeCustomerData } = require('../utils/order');
 
 const CRM_API_BASE_URL = process.env.CRM_API_URL || 'https://api.saguaro.com.ua';
+const ORDER_STORAGE_TTL = 30 * 60 * 1000;
 
 const orderStorage = new Map();
+
+function storeOrder(orderId, orderData) {
+  orderStorage.set(orderId, orderData);
+  setTimeout(() => orderStorage.delete(orderId), ORDER_STORAGE_TTL);
+}
+
+function handleOrderWithoutAddress(req, res, orderData) {
+  const orderId = extractOrderId(orderData);
+  storeOrder(orderId, orderData);
+  
+  const addressUrl = buildAddressUrl(req, orderId);
+  
+  return res.status(200).json({
+    success: true,
+    redirectUrl: addressUrl,
+    addressUrl
+  });
+}
+
+function buildCrmPayload(orderId, orderData) {
+  return {
+    id: orderId,
+    shop: orderData.shop,
+    customer: mergeCustomerData(orderData.customer, orderData.deliveryAddress),
+    cart: orderData.cart,
+    deliveryAddress: orderData.deliveryAddress,
+    metadata: orderData.metadata
+  };
+}
+
+async function sendToCrm(orderId, crmPayload) {
+  const crmUrl = `${CRM_API_BASE_URL}/webhooks/shopify/orders/${orderId}/invoice`;
+  
+  logger.crmRequest({ url: crmUrl, payload: crmPayload });
+  
+  const response = await axios.post(crmUrl, crmPayload, {
+    timeout: 10000,
+    headers: { 'Content-Type': 'application/json' }
+  });
+  
+  logger.crmResponse({
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+    data: response.data
+  });
+  
+  return response.data?.pageUrl;
+}
+
+async function createShopifyOrder(orderData) {
+  try {
+    const shopifyOrder = await shopifyService.createOrder(orderData);
+    
+    if (shopifyOrder?.id) {
+      await shopifyService.closeOrder(orderData.shop?.domain, shopifyOrder.id);
+    }
+  } catch (error) {
+    logger.error('SHOPIFY_ORDER_CREATION', error);
+  }
+}
 
 router.post('/checkout', async (req, res) => {
   const orderData = req.body;
@@ -19,98 +81,33 @@ router.post('/checkout', async (req, res) => {
   });
   
   if (!orderData.deliveryAddress) {
-    const orderId = orderData.id || orderData.order_id || orderData.orderId || orderData.cart?.token || crypto.randomBytes(16).toString('hex');
-    orderStorage.set(orderId, orderData);
-    
-    setTimeout(() => {
-      orderStorage.delete(orderId);
-    }, 30 * 60 * 1000);
-    
-    const protocol = req.protocol || 'http';
-    const host = req.get('host') || `localhost:${process.env.PORT || 3000}`;
-    const baseUrl = process.env.BASE_URL || `${protocol}://${host}`;
-    const addressUrl = `${baseUrl}/address?orderId=${orderId}`;
-    
-    return res.status(200).json({
-      success: true,
-      redirectUrl: addressUrl,
-      addressUrl: addressUrl
-    });
+    return handleOrderWithoutAddress(req, res, orderData);
   }
+  
+  const orderId = extractOrderId(orderData);
   
   logger.address({
     deliveryAddress: orderData.deliveryAddress,
-    orderId: orderData.id || orderData.order_id || orderData.orderId || orderData.cart?.token
+    orderId
   });
   
-  const orderId = orderData.id || orderData.order_id || orderData.orderId || orderData.cart?.token || '1';
-  
-  const customerData = orderData.customer || {};
-  if (orderData.deliveryAddress?.fullName) {
-    customerData.fullName = orderData.deliveryAddress.fullName;
-  }
-  if (orderData.deliveryAddress?.phone) {
-    customerData.phone = orderData.deliveryAddress.phone;
-  }
-
-  const crmPayload = {
-    id: orderId,
-    shop: orderData.shop,
-    customer: customerData,
-    cart: orderData.cart,
-    deliveryAddress: orderData.deliveryAddress,
-    metadata: orderData.metadata
-  };
-
-  logger.crmRequest({
-    url: `${CRM_API_BASE_URL}/webhooks/shopify/orders/${orderId}/invoice`,
-    payload: crmPayload
-  });
-
   try {
-    const crmUrl = `${CRM_API_BASE_URL}/webhooks/shopify/orders/${orderId}/invoice`;
-    
-    const crmResponse = await axios.post(crmUrl, crmPayload, {
-      timeout: 10000,
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    });
-    
-    logger.crmResponse({
-      status: crmResponse.status,
-      statusText: crmResponse.statusText,
-      headers: crmResponse.headers,
-      data: crmResponse.data
-    });
-    
-    const pageUrl = crmResponse.data?.pageUrl;
+    const crmPayload = buildCrmPayload(orderId, orderData);
+    const pageUrl = await sendToCrm(orderId, crmPayload);
     
     if (!pageUrl) {
       logger.error('CRM_RESPONSE', new Error('No pageUrl in CRM response'));
-      return res.status(500).json({ 
+      return res.status(500).json({
         success: false,
-        message: 'Failed to get payment URL from CRM' 
+        message: 'Failed to get payment URL from CRM'
       });
     }
-
-    try {
-      const shopifyOrder = await shopifyService.createOrder(orderData);
-      
-      if (shopifyOrder && shopifyOrder.id) {
-        try {
-          await shopifyService.closeOrder(orderData.shop?.domain, shopifyOrder.id);
-        } catch (closeError) {
-          logger.error('SHOPIFY_CLOSE_ORDER', closeError);
-        }
-      }
-    } catch (shopifyError) {
-      logger.error('SHOPIFY_CREATE_ORDER', shopifyError);
-    }
+    
+    await createShopifyOrder(orderData);
     
     res.status(200).json({
       success: true,
-      pageUrl: pageUrl
+      pageUrl
     });
   } catch (error) {
     logger.error('CRM_REQUEST', error);

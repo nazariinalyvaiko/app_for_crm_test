@@ -1,66 +1,71 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
+const { splitFullName } = require('../utils/nameFormatter');
 
 const SHOPIFY_ACCESS_KEY = process.env.SHOPIFY_ACCESS_KEY;
 const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || '2024-01';
+const ORDER_STORAGE_TTL = 30 * 60 * 1000;
 
 function getShopifyApiUrl(shopDomain) {
   const domain = shopDomain.replace(/\.myshopify\.com$/, '');
   return `https://${domain}.myshopify.com/admin/api/${SHOPIFY_API_VERSION}`;
 }
 
+function formatAddressLine(deliveryAddress) {
+  const { region = '', city = '', warehouseAddress = '', fullAddress = '', warehouseNumber = '' } = deliveryAddress;
+  
+  if (warehouseAddress) return warehouseAddress;
+  
+  if (fullAddress) {
+    return fullAddress
+      .replace(region, '')
+      .replace(city, '')
+      .trim()
+      .replace(/^,\s*|,\s*$/g, '') || '';
+  }
+  
+  return warehouseNumber ? `Відділення Нової Пошти №${warehouseNumber}` : '';
+}
+
 function formatShippingAddress(deliveryAddress) {
   if (!deliveryAddress) return null;
   
-  const fullName = deliveryAddress.fullName || '';
-  const nameParts = fullName.split(' ').filter(p => p);
-  const firstName = nameParts[0] || '';
-  const lastName = nameParts.slice(1).join(' ') || '';
-  
-  const region = deliveryAddress.region || '';
-  const city = deliveryAddress.city || '';
-  const warehouseAddress = deliveryAddress.warehouseAddress || '';
-  const address1 = warehouseAddress || `${deliveryAddress.fullAddress || ''}`.replace(region, '').replace(city, '').trim().replace(/^,\s*|,\s*$/g, '') || '';
+  const { firstName, lastName } = splitFullName(deliveryAddress.fullName);
   
   return {
     first_name: firstName,
     last_name: lastName,
     phone: deliveryAddress.phone || '',
-    address1: address1 || `Відділення Нової Пошти №${deliveryAddress.warehouseNumber || ''}`,
-    city: city,
-    province: region,
+    address1: formatAddressLine(deliveryAddress),
+    city: deliveryAddress.city || '',
+    province: deliveryAddress.region || '',
     country: 'UA',
     zip: ''
   };
 }
 
 function formatBillingAddress(customer, deliveryAddress) {
-  const address = formatShippingAddress(deliveryAddress);
-  if (!address) {
-    const fullName = customer?.fullName || '';
-    const nameParts = fullName.split(' ').filter(p => p);
-    const firstName = nameParts[0] || '';
-    const lastName = nameParts.slice(1).join(' ') || '';
-    
-    return {
-      first_name: firstName,
-      last_name: lastName,
-      phone: customer?.phone || '',
-      address1: '',
-      city: '',
-      province: '',
-      country: 'UA',
-      zip: ''
-    };
-  }
-  return address;
+  const shippingAddress = formatShippingAddress(deliveryAddress);
+  
+  if (shippingAddress) return shippingAddress;
+  
+  const { firstName, lastName } = splitFullName(customer?.fullName);
+  
+  return {
+    first_name: firstName,
+    last_name: lastName,
+    phone: customer?.phone || '',
+    address1: '',
+    city: '',
+    province: '',
+    country: 'UA',
+    zip: ''
+  };
 }
 
 function formatCustomer(customer, deliveryAddress) {
   const fullName = deliveryAddress?.fullName || customer?.fullName || '';
-  const nameParts = fullName.split(' ').filter(p => p);
-  const firstName = nameParts[0] || '';
-  const lastName = nameParts.slice(1).join(' ') || '';
+  const { firstName, lastName } = splitFullName(fullName);
   
   return {
     first_name: firstName,
@@ -70,38 +75,41 @@ function formatCustomer(customer, deliveryAddress) {
   };
 }
 
-async function createOrder(orderData) {
+function getShopifyHeaders() {
+  return {
+    'X-Shopify-Access-Token': SHOPIFY_ACCESS_KEY,
+    'Content-Type': 'application/json'
+  };
+}
+
+function validateOrderData(orderData) {
   if (!SHOPIFY_ACCESS_KEY) {
     throw new Error('SHOPIFY_ACCESS_KEY is not configured');
   }
-
-  const shopDomain = orderData.shop?.domain;
-  if (!shopDomain) {
+  
+  if (!orderData.shop?.domain) {
     throw new Error('Shop domain is missing');
   }
-
-  const apiUrl = getShopifyApiUrl(shopDomain);
-  const cart = orderData.cart || {};
-  const items = cart.items || [];
-  const customer = orderData.customer || {};
-  const deliveryAddress = orderData.deliveryAddress || {};
-
-  if (!items || items.length === 0) {
+  
+  const items = orderData.cart?.items || [];
+  if (items.length === 0) {
     throw new Error('No items in cart');
   }
+}
 
-  const lineItems = items.map(item => {
-    const lineItem = {
-      variant_id: item.variant_id || item.id,
-      quantity: item.quantity || 1
-    };
-    
-    if (item.price && item.price > 0) {
-      lineItem.price = (item.price / 100).toFixed(2);
-    }
-    
-    return lineItem;
-  });
+async function createOrder(orderData) {
+  validateOrderData(orderData);
+  
+  const shopDomain = orderData.shop.domain;
+  const apiUrl = getShopifyApiUrl(shopDomain);
+  const { cart = {}, customer = {}, deliveryAddress = {} } = orderData;
+  const items = cart.items || [];
+
+  const lineItems = items.map(item => ({
+    variant_id: item.variant_id || item.id,
+    quantity: item.quantity || 1,
+    ...(item.price > 0 && { price: (item.price / 100).toFixed(2) })
+  }));
 
   const orderPayload = {
     order: {
@@ -125,10 +133,7 @@ async function createOrder(orderData) {
     });
 
     const response = await axios.post(`${apiUrl}/orders.json`, orderPayload, {
-      headers: {
-        'X-Shopify-Access-Token': SHOPIFY_ACCESS_KEY,
-        'Content-Type': 'application/json'
-      },
+      headers: getShopifyHeaders(),
       timeout: 15000
     });
 
@@ -153,11 +158,11 @@ async function closeOrder(shopDomain, orderId) {
   if (!SHOPIFY_ACCESS_KEY) {
     throw new Error('SHOPIFY_ACCESS_KEY is not configured');
   }
-
+  
   if (!shopDomain || !orderId) {
     throw new Error('Shop domain and order ID are required');
   }
-
+  
   const apiUrl = getShopifyApiUrl(shopDomain);
 
   try {
@@ -168,10 +173,7 @@ async function closeOrder(shopDomain, orderId) {
     });
 
     const response = await axios.post(`${apiUrl}/orders/${orderId}/close.json`, {}, {
-      headers: {
-        'X-Shopify-Access-Token': SHOPIFY_ACCESS_KEY,
-        'Content-Type': 'application/json'
-      },
+      headers: getShopifyHeaders(),
       timeout: 10000
     });
 
