@@ -23,18 +23,17 @@ const CSP_POLICY = [
   "frame-ancestors 'none'"
 ].join('; ');
 
-const ALLOWED_ORIGINS = [
-  'https://barefoot-9610.myshopify.com',
-  'https://barefoot-9610.myshopify.com/'
-];
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || 'https://barefoot-9610.myshopify.com';
 
 function getCorsOrigin(origin) {
-  if (!origin) return ALLOWED_ORIGINS[0];
+  if (!origin) return ALLOWED_ORIGIN;
   
   const normalizedOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin;
-  return ALLOWED_ORIGINS.includes(normalizedOrigin) || ALLOWED_ORIGINS.includes(origin)
+  const normalizedAllowed = ALLOWED_ORIGIN.endsWith('/') ? ALLOWED_ORIGIN.slice(0, -1) : ALLOWED_ORIGIN;
+  
+  return (normalizedOrigin === normalizedAllowed || origin === ALLOWED_ORIGIN)
     ? origin
-    : ALLOWED_ORIGINS[0];
+    : ALLOWED_ORIGIN;
 }
 
 app.use((req, res, next) => {
@@ -54,14 +53,16 @@ app.use((req, res, next) => {
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) {
-      return callback(null, ALLOWED_ORIGINS[0]);
+      return callback(null, ALLOWED_ORIGIN);
     }
     
     const normalizedOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin;
-    if (ALLOWED_ORIGINS.includes(normalizedOrigin) || ALLOWED_ORIGINS.includes(origin)) {
+    const normalizedAllowed = ALLOWED_ORIGIN.endsWith('/') ? ALLOWED_ORIGIN.slice(0, -1) : ALLOWED_ORIGIN;
+    
+    if (normalizedOrigin === normalizedAllowed || origin === ALLOWED_ORIGIN) {
       callback(null, true);
     } else {
-      callback(null, ALLOWED_ORIGINS[0]);
+      callback(null, ALLOWED_ORIGIN);
     }
   },
   methods: ['GET', 'POST', 'OPTIONS'],

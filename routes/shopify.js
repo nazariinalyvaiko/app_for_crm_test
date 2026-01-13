@@ -6,9 +6,19 @@ const shopifyService = require('../services/shopify');
 const { extractOrderId, buildAddressUrl, mergeCustomerData } = require('../utils/order');
 
 const CRM_API_BASE_URL = process.env.CRM_API_URL || 'https://api.saguaro.com.ua';
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || 'https://barefoot-9610.myshopify.com';
 const ORDER_STORAGE_TTL = 30 * 60 * 1000;
 
 const orderStorage = new Map();
+
+function getCorsOrigin(origin) {
+  if (!origin) return ALLOWED_ORIGIN;
+  const normalizedOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin;
+  const normalizedAllowed = ALLOWED_ORIGIN.endsWith('/') ? ALLOWED_ORIGIN.slice(0, -1) : ALLOWED_ORIGIN;
+  return (normalizedOrigin === normalizedAllowed || origin === ALLOWED_ORIGIN)
+    ? origin
+    : ALLOWED_ORIGIN;
+}
 
 function storeOrder(orderId, orderData) {
   orderStorage.set(orderId, orderData);
@@ -71,22 +81,13 @@ async function createShopifyOrder(orderData) {
   }
 }
 
-const ALLOWED_SHOPIFY_ORIGIN = 'https://barefoot-9610.myshopify.com';
-
-function getCorsOrigin(origin) {
-  if (!origin) return ALLOWED_SHOPIFY_ORIGIN;
-  const normalizedOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin;
-  return (normalizedOrigin === ALLOWED_SHOPIFY_ORIGIN || origin === ALLOWED_SHOPIFY_ORIGIN)
-    ? origin
-    : ALLOWED_SHOPIFY_ORIGIN;
-}
-
 router.options('/checkout', (req, res) => {
   const origin = getCorsOrigin(req.headers.origin);
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.sendStatus(200);
+  res.setHeader('Access-Control-Max-Age', '86400');
+  res.status(200).end();
 });
 
 router.post('/checkout', async (req, res) => {
@@ -148,7 +149,8 @@ router.options('/order/:orderId', (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.sendStatus(200);
+  res.setHeader('Access-Control-Max-Age', '86400');
+  res.status(200).end();
 });
 
 router.get('/order/:orderId', (req, res) => {

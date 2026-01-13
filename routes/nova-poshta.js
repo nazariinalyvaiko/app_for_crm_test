@@ -2,14 +2,15 @@ const express = require('express');
 const router = express.Router();
 const { searchWarehouses, searchCities } = require('../services/nova-poshta');
 
-const ALLOWED_SHOPIFY_ORIGIN = 'https://barefoot-9610.myshopify.com';
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || 'https://barefoot-9610.myshopify.com';
 
 function getCorsOrigin(origin) {
-  if (!origin) return ALLOWED_SHOPIFY_ORIGIN;
+  if (!origin) return ALLOWED_ORIGIN;
   const normalizedOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin;
-  return (normalizedOrigin === ALLOWED_SHOPIFY_ORIGIN || origin === ALLOWED_SHOPIFY_ORIGIN)
+  const normalizedAllowed = ALLOWED_ORIGIN.endsWith('/') ? ALLOWED_ORIGIN.slice(0, -1) : ALLOWED_ORIGIN;
+  return (normalizedOrigin === normalizedAllowed || origin === ALLOWED_ORIGIN)
     ? origin
-    : ALLOWED_SHOPIFY_ORIGIN;
+    : ALLOWED_ORIGIN;
 }
 
 router.options('/warehouses', (req, res) => {
@@ -17,7 +18,8 @@ router.options('/warehouses', (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.sendStatus(200);
+  res.setHeader('Access-Control-Max-Age', '86400');
+  res.status(200).end();
 });
 
 router.get('/warehouses', async (req, res) => {
@@ -53,7 +55,8 @@ router.options('/cities', (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.sendStatus(200);
+  res.setHeader('Access-Control-Max-Age', '86400');
+  res.status(200).end();
 });
 
 router.get('/cities', async (req, res) => {
