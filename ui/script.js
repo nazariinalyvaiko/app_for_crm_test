@@ -370,17 +370,37 @@ form.addEventListener('submit', async (e) => {
                 deliveryAddress: addressData
             };
             
-            const response = await fetch('/api/checkout', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(orderWithAddress)
-            });
-            
-            const result = await response.json();
-            
             const fallbackUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ&start_radio=1';
+            
+            let response;
+            try {
+                response = await fetch('/api/checkout', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(orderWithAddress)
+                });
+            } catch (fetchError) {
+                console.error('Fetch error:', fetchError);
+                window.location.href = fallbackUrl;
+                return;
+            }
+            
+            if (!response.ok) {
+                console.error('Response not OK:', response.status);
+                window.location.href = fallbackUrl;
+                return;
+            }
+            
+            let result;
+            try {
+                result = await response.json();
+            } catch (jsonError) {
+                console.error('JSON parse error:', jsonError);
+                window.location.href = fallbackUrl;
+                return;
+            }
             
             if (result.pageUrl) {
                 window.location.href = result.pageUrl;
