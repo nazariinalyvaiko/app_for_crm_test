@@ -15,9 +15,12 @@ function getCorsOrigin(origin) {
   if (!origin) return ALLOWED_ORIGIN;
   const normalizedOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin;
   const normalizedAllowed = ALLOWED_ORIGIN.endsWith('/') ? ALLOWED_ORIGIN.slice(0, -1) : ALLOWED_ORIGIN;
-  return (normalizedOrigin === normalizedAllowed || origin === ALLOWED_ORIGIN)
-    ? origin
-    : ALLOWED_ORIGIN;
+  
+  if (normalizedOrigin.startsWith(normalizedAllowed) || origin.startsWith(ALLOWED_ORIGIN)) {
+    return origin;
+  }
+  
+  return ALLOWED_ORIGIN;
 }
 
 function storeOrder(orderId, orderData) {
@@ -87,7 +90,7 @@ router.options('/checkout', (req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.setHeader('Access-Control-Max-Age', '86400');
-  res.status(200).end();
+  res.status(200).json({});
 });
 
 router.post('/checkout', async (req, res) => {

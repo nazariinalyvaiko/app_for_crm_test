@@ -31,9 +31,11 @@ function getCorsOrigin(origin) {
   const normalizedOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin;
   const normalizedAllowed = ALLOWED_ORIGIN.endsWith('/') ? ALLOWED_ORIGIN.slice(0, -1) : ALLOWED_ORIGIN;
   
-  return (normalizedOrigin === normalizedAllowed || origin === ALLOWED_ORIGIN)
-    ? origin
-    : ALLOWED_ORIGIN;
+  if (normalizedOrigin.startsWith(normalizedAllowed) || origin.startsWith(ALLOWED_ORIGIN)) {
+    return origin;
+  }
+  
+  return ALLOWED_ORIGIN;
 }
 
 app.use((req, res, next) => {
@@ -59,7 +61,7 @@ app.use(cors({
     const normalizedOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin;
     const normalizedAllowed = ALLOWED_ORIGIN.endsWith('/') ? ALLOWED_ORIGIN.slice(0, -1) : ALLOWED_ORIGIN;
     
-    if (normalizedOrigin === normalizedAllowed || origin === ALLOWED_ORIGIN) {
+    if (normalizedOrigin.startsWith(normalizedAllowed) || origin.startsWith(ALLOWED_ORIGIN)) {
       callback(null, true);
     } else {
       callback(null, ALLOWED_ORIGIN);
