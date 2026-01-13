@@ -23,23 +23,52 @@ const CSP_POLICY = [
   "frame-ancestors 'none'"
 ].join('; ');
 
+const ALLOWED_ORIGINS = [
+  'https://barefoot-9610.myshopify.com',
+  'https://barefoot-9610.myshopify.com/'
+];
+
+function getCorsOrigin(origin) {
+  if (!origin) return ALLOWED_ORIGINS[0];
+  
+  const normalizedOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin;
+  return ALLOWED_ORIGINS.includes(normalizedOrigin) || ALLOWED_ORIGINS.includes(origin)
+    ? origin
+    : ALLOWED_ORIGINS[0];
+}
+
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  const origin = getCorsOrigin(req.headers.origin);
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Max-Age', '86400');
   
   if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
+    return res.status(200).end();
   }
   
   next();
 });
 
 app.use(cors({
-  origin: '*',
+  origin: (origin, callback) => {
+    if (!origin) {
+      return callback(null, ALLOWED_ORIGINS[0]);
+    }
+    
+    const normalizedOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin;
+    if (ALLOWED_ORIGINS.includes(normalizedOrigin) || ALLOWED_ORIGINS.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(null, ALLOWED_ORIGINS[0]);
+    }
+  },
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type'],
-  credentials: false
+  credentials: false,
+  preflightContinue: false,
+  optionsSuccessStatus: 200
 }));
 
 app.use(express.json());
@@ -57,6 +86,19 @@ app.get('/address', (req, res) => {
 });
 
 app.use(express.static(path.join(__dirname, 'ui')));
+
+app.use((err, req, res, next) => {
+  const origin = getCorsOrigin(req.headers.origin);
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  
+  console.error('Error:', err);
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || 'Internal server error'
+  });
+});
 
 if (!isVercel) {
   app.listen(PORT, '0.0.0.0', () => {
