@@ -18,6 +18,16 @@ function storeOrder(orderId, orderData) {
 
 function handleOrderWithoutAddress(req, res, orderData) {
   const orderId = extractOrderId(orderData);
+  
+  logger.shopify({
+    action: 'STORING_ORDER_WITHOUT_ADDRESS',
+    orderId,
+    orderDataKeys: Object.keys(orderData),
+    cartItemsCount: orderData.cart?.items?.length || 0,
+    cartItems: orderData.cart?.items || [],
+    fullOrderData: orderData
+  });
+  
   storeOrder(orderId, orderData);
   
   const addressUrl = buildAddressUrl(req, orderId);
@@ -30,29 +40,21 @@ function handleOrderWithoutAddress(req, res, orderData) {
 }
 
 function buildCrmPayload(orderId, orderData) {
+  const deliveryAddress = { ...orderData.deliveryAddress };
+  delete deliveryAddress.fullName;
+  delete deliveryAddress.phone;
+  
   return {
+    ...orderData,
     id: orderId,
-    shop: orderData.shop,
     customer: mergeCustomerData(orderData.customer, orderData.deliveryAddress),
-    cart: orderData.cart,
-    deliveryAddress: orderData.deliveryAddress,
-    metadata: orderData.metadata
+    deliveryAddress: deliveryAddress
   };
 }
 
 async function sendToCrm(orderId, crmPayload) {
   const crmUrl = `${CRM_API_BASE_URL}/webhooks/shopify/orders/${orderId}/invoice`;
   
-  console.log('=== SENDING TO CRM ===');
-  console.log('URL:', crmUrl);
-  console.log('Payload:', JSON.stringify(crmPayload, null, 2));
-  
-  logger.crmRequest({
-    url: crmUrl,
-    method: 'POST',
-    orderId,
-    payload: crmPayload
-  });
   
   try {
     const response = await axios.post(crmUrl, crmPayload, {
@@ -60,18 +62,12 @@ async function sendToCrm(orderId, crmPayload) {
       headers: { 'Content-Type': 'application/json' }
     });
     
-    console.log('=== CRM RESPONSE ===');
-    console.log('Status:', response.status);
-    console.log('Response data:', JSON.stringify(response.data, null, 2));
-    console.log('PageUrl:', response.data?.pageUrl);
+    const fullResponseJson = JSON.stringify(response.data, null, 2);
+    console.log('=== FULL JSON FROM CRM ===');
+    console.log(fullResponseJson);
     
     logger.crmResponse({
-      url: crmUrl,
-      status: response.status,
-      statusText: response.statusText,
-      pageUrl: response.data?.pageUrl,
-      invoiceId: response.data?.invoiceId,
-      fullResponse: response.data
+      fullJsonFromCrm: fullResponseJson
     });
     
     return response.data?.pageUrl;
@@ -109,42 +105,32 @@ router.post('/checkout', async (req, res) => {
   const orderId = extractOrderId(orderData);
   
   console.log('Extracted orderId:', orderId);
+  console.log('Order data structure:');
+  console.log('  - orderData.cart?.items:', orderData.cart?.items?.length || 0, 'items');
+  console.log('  - orderData.line_items:', orderData.line_items?.length || 0, 'items');
+  console.log('  - orderData.items:', orderData.items?.length || 0, 'items');
+  
+  const fullOrderDataJson = JSON.stringify(orderData, null, 2);
+  console.log('=== FULL JSON FROM SHOPIFY ===');
+  console.log(fullOrderDataJson);
   
   logger.shopify({
-    action: 'INCOMING_REQUEST',
-    orderId,
-    hasDeliveryAddress: !!orderData.deliveryAddress,
-    origin: req.headers.origin,
-    ip: req.ip,
-    cartItemsCount: orderData.cart?.items?.length || 0,
-    totalPrice: orderData.cart?.total_price,
-    currency: orderData.cart?.currency
+    fullJsonFromShopify: fullOrderDataJson
   });
   
   if (!orderData.deliveryAddress) {
-    logger.shopify({
-      action: 'REDIRECT_TO_ADDRESS_FORM',
-      orderId
-    });
     return handleOrderWithoutAddress(req, res, orderData);
   }
-  
-  logger.address({
-    orderId,
-    region: orderData.deliveryAddress.region,
-    city: orderData.deliveryAddress.city,
-    warehouseNumber: orderData.deliveryAddress.warehouseNumber,
-    fullName: orderData.deliveryAddress.fullName,
-    phone: orderData.deliveryAddress.phone
-  });
   
   try {
     const crmPayload = buildCrmPayload(orderId, orderData);
     
-    logger.shopify({
-      action: 'SENDING_TO_CRM',
-      orderId,
-      crmUrl: `${CRM_API_BASE_URL}/webhooks/shopify/orders/${orderId}/invoice`
+    const fullCrmPayloadJson = JSON.stringify(crmPayload, null, 2);
+    console.log('=== FULL JSON TO CRM ===');
+    console.log(fullCrmPayloadJson);
+    
+    logger.crmRequest({
+      fullJsonToCrm: fullCrmPayloadJson
     });
     
     const pageUrl = await sendToCrm(orderId, crmPayload);
@@ -216,6 +202,15 @@ router.get('/order/:orderId', (req, res) => {
       message: 'Order not found or expired'
     });
   }
+  
+  logger.shopify({
+    action: 'RETRIEVING_STORED_ORDER',
+    orderId,
+    orderDataKeys: Object.keys(orderData),
+    cartItemsCount: orderData.cart?.items?.length || 0,
+    cartItems: orderData.cart?.items || [],
+    hasCart: !!orderData.cart
+  });
   
   res.status(200).json({
     success: true,
