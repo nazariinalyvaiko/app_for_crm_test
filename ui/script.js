@@ -378,13 +378,29 @@ form.addEventListener('submit', async (e) => {
                 body: JSON.stringify(orderWithAddress)
             });
             
-            const result = await response.json();
+            let result;
+            try {
+                result = await response.json();
+            } catch (parseError) {
+                const errorText = await response.text().catch(() => response.statusText);
+                console.error('Parse error:', parseError, 'Response text:', errorText);
+                throw new Error(`Помилка парсингу відповіді: ${errorText}`);
+            }
+            
+            console.log('Response status:', response.status, 'Result:', result);
+            
+            if (!response.ok) {
+                throw new Error(result.message || `Помилка сервера: ${response.status}`);
+            }
             
             if (result.pageUrl) {
+                console.log('Redirecting to:', result.pageUrl);
                 window.location.href = result.pageUrl;
             } else if (result.redirectUrl) {
+                console.log('Redirecting to:', result.redirectUrl);
                 window.location.href = result.redirectUrl;
             } else if (result.paymentUrl) {
+                console.log('Redirecting to:', result.paymentUrl);
                 window.location.href = result.paymentUrl;
             } else if (!result.success) {
                 throw new Error(result.message || 'No payment URL received');
