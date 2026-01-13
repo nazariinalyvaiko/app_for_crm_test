@@ -43,6 +43,10 @@ function buildCrmPayload(orderId, orderData) {
 async function sendToCrm(orderId, crmPayload) {
   const crmUrl = `${CRM_API_BASE_URL}/webhooks/shopify/orders/${orderId}/invoice`;
   
+  console.log('=== SENDING TO CRM ===');
+  console.log('URL:', crmUrl);
+  console.log('Payload:', JSON.stringify(crmPayload, null, 2));
+  
   logger.crmRequest({
     url: crmUrl,
     method: 'POST',
@@ -50,21 +54,34 @@ async function sendToCrm(orderId, crmPayload) {
     payload: crmPayload
   });
   
-  const response = await axios.post(crmUrl, crmPayload, {
-    timeout: 10000,
-    headers: { 'Content-Type': 'application/json' }
-  });
-  
-  logger.crmResponse({
-    url: crmUrl,
-    status: response.status,
-    statusText: response.statusText,
-    pageUrl: response.data?.pageUrl,
-    invoiceId: response.data?.invoiceId,
-    fullResponse: response.data
-  });
-  
-  return response.data?.pageUrl;
+  try {
+    const response = await axios.post(crmUrl, crmPayload, {
+      timeout: 10000,
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
+    console.log('=== CRM RESPONSE ===');
+    console.log('Status:', response.status);
+    console.log('Response data:', JSON.stringify(response.data, null, 2));
+    console.log('PageUrl:', response.data?.pageUrl);
+    
+    logger.crmResponse({
+      url: crmUrl,
+      status: response.status,
+      statusText: response.statusText,
+      pageUrl: response.data?.pageUrl,
+      invoiceId: response.data?.invoiceId,
+      fullResponse: response.data
+    });
+    
+    return response.data?.pageUrl;
+  } catch (error) {
+    console.error('=== CRM REQUEST ERROR ===');
+    console.error('Error:', error.message);
+    console.error('Response status:', error.response?.status);
+    console.error('Response data:', error.response?.data);
+    throw error;
+  }
 }
 
 async function createShopifyOrder(orderData) {
@@ -82,10 +99,16 @@ async function createShopifyOrder(orderData) {
 router.use(corsMiddleware);
 
 router.post('/checkout', async (req, res) => {
+  console.log('=== CHECKOUT REQUEST START ===');
+  console.log('Headers:', JSON.stringify(req.headers, null, 2));
+  console.log('Body keys:', Object.keys(req.body || {}));
+  
   setCorsHeaders(res, req.headers.origin);
   
   const orderData = req.body;
   const orderId = extractOrderId(orderData);
+  
+  console.log('Extracted orderId:', orderId);
   
   logger.shopify({
     action: 'INCOMING_REQUEST',
@@ -154,13 +177,21 @@ router.post('/checkout', async (req, res) => {
       pageUrl
     });
   } catch (error) {
+    console.error('=== CHECKOUT ERROR ===');
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    console.error('Error response:', error.response?.data);
+    console.error('Error status:', error.response?.status);
+    
     logger.error('CRM_REQUEST', error);
     
     logger.shopify({
       action: 'ERROR',
       orderId,
       error: error.message,
-      errorStack: error.stack
+      errorStack: error.stack,
+      errorResponse: error.response?.data,
+      errorStatus: error.response?.status
     });
     
     res.status(500).json({
@@ -169,6 +200,8 @@ router.post('/checkout', async (req, res) => {
       error: error.message
     });
   }
+  
+  console.log('=== CHECKOUT REQUEST END ===');
 });
 
 router.get('/order/:orderId', (req, res) => {
