@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Адреса доставки</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Адреса доставки</h1>
+        
+        <div class="error-notification" id="errorNotification">
+            <span id="errorText"></span>
+        </div>
+        
+        <form id="addressForm">
+            <div class="form-group">
+                <label for="fullName">ПІБ *</label>
+                <input 
+                    type="text" 
+                    id="fullName" 
+                    name="fullName" 
+                    placeholder="Введіть повне ім'я"
+                    required
+                    autocomplete="name"
+                >
+                <div class="error-message" id="fullNameError">Введіть ПІБ</div>
+            </div>
+
+            <div class="form-group">
+                <label for="phone">Номер телефону *</label>
+                <input 
+                    type="tel" 
+                    id="phone" 
+                    name="phone" 
+                    placeholder="+380501234567"
+                    required
+                    autocomplete="tel"
+                >
+                <div class="error-message" id="phoneError">Введіть номер телефону</div>
+            </div>
+
+            <div class="form-group">
+                <label for="region">Область *</label>
+                <select id="region" name="region" required>
+                    <option value="">Оберіть область</option>
+                </select>
+                <div class="error-message" id="regionError">Оберіть область</div>
+            </div>
+
+            <div class="form-group">
+                <label for="city">Населений пункт *</label>
+                <input 
+                    type="text" 
+                    id="city" 
+                    name="city" 
+                    placeholder="Введіть місто або село"
+                    required
+                    autocomplete="off"
+                    disabled
+                >
+                <div class="error-message" id="cityError">Введіть населений пункт</div>
+                <div id="citySuggestions" class="suggestions"></div>
+            </div>
+
+            <div class="form-group">
+                <label for="warehouse">Відділення Нової Пошти *</label>
+                <select id="warehouse" name="warehouse" required disabled>
+                    <option value="">Спочатку оберіть населений пункт</option>
+                </select>
+                <div class="error-message" id="warehouseError">Оберіть відділення</div>
+            </div>
+
+            <button type="submit" class="btn" id="submitBtn">
+                Перейти до оплати
+            </button>
+        </form>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Обробка...</p>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
