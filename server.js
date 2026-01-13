@@ -9,6 +9,7 @@ const PORT = process.env.PORT || 3000;
 const isVercel = process.env.VERCEL === '1';
 
 const { corsMiddleware, setCorsHeaders } = require('./middleware/cors');
+const logger = require('./utils/logger');
 
 const CSP_POLICY = [
   "default-src 'self'",
@@ -70,6 +71,12 @@ if (!isVercel) {
     console.log('  GET  /api/nova-poshta/cities - Nova Poshta cities search');
     console.log('  POST /api/crm/order - CRM order');
     console.log('  GET  /address - Address input page');
+  });
+} else {
+  logger.shopify({
+    action: 'SERVER_STARTED',
+    environment: 'Vercel',
+    timestamp: new Date().toISOString()
   });
 }
 

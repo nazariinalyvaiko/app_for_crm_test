@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV;
+const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL_ENV || !!process.env.VERCEL_URL;
 const logsDir = isVercel 
   ? path.join('/tmp', 'logs')
   : path.join(__dirname, '..', 'logs');
@@ -29,20 +29,21 @@ function formatTimestamp() {
 
 function writeLog(level, section, data) {
   const timestamp = formatTimestamp();
-  const logEntry = {
-    timestamp,
-    level,
-    section,
-    data
-  };
-  
-  const logLine = JSON.stringify(logEntry, null, 2);
   
   if (isVercel) {
-    console.log(`[${level}] ${section}`);
-    console.log(logLine);
+    console.log(`\n[${timestamp}] [${level}] ${section}`);
+    console.log(JSON.stringify(data, null, 2));
     console.log('─'.repeat(80));
   } else {
+    const logEntry = {
+      timestamp,
+      level,
+      section,
+      data
+    };
+    
+    const logLine = JSON.stringify(logEntry, null, 2);
+    
     try {
       const logFile = getLogFileName();
       fs.appendFileSync(logFile, logLine + '\n' + '='.repeat(80) + '\n\n', 'utf8');
