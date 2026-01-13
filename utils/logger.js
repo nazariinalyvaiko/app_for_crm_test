@@ -1,10 +1,17 @@
 const fs = require('fs');
 const path = require('path');
 
-const logsDir = path.join(__dirname, '..', 'logs');
+const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV;
+const logsDir = isVercel 
+  ? path.join('/tmp', 'logs')
+  : path.join(__dirname, '..', 'logs');
 
 if (!fs.existsSync(logsDir)) {
-  fs.mkdirSync(logsDir, { recursive: true });
+  try {
+    fs.mkdirSync(logsDir, { recursive: true });
+  } catch (error) {
+    console.error('Failed to create logs directory:', error.message);
+  }
 }
 
 function getLogFileName() {
@@ -32,10 +39,17 @@ function writeLog(level, section, data) {
     };
     
     const logLine = JSON.stringify(logEntry, null, 2) + '\n' + '='.repeat(80) + '\n\n';
-    
     fs.appendFileSync(logFile, logLine, 'utf8');
   } catch (error) {
     console.error('Failed to write log:', error.message);
+    const timestamp = formatTimestamp();
+    const logEntry = {
+      timestamp,
+      level,
+      section,
+      data
+    };
+    console.log(JSON.stringify(logEntry, null, 2));
   }
 }
 
