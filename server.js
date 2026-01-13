@@ -8,6 +8,8 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const isVercel = process.env.VERCEL === '1';
 
+const { corsMiddleware, setCorsHeaders } = require('./middleware/cors');
+
 const CSP_POLICY = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'sha256-ieoeWczDHkReVBsRBqaal5AFMlBtNjMzgwKvLqi/tSU=' https:",
@@ -23,55 +25,13 @@ const CSP_POLICY = [
   "frame-ancestors 'none'"
 ].join('; ');
 
-const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || 'https://barefoot-9610.myshopify.com';
-
-function getCorsOrigin(origin) {
-  if (!origin) return ALLOWED_ORIGIN;
-  
-  const normalizedOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin;
-  const normalizedAllowed = ALLOWED_ORIGIN.endsWith('/') ? ALLOWED_ORIGIN.slice(0, -1) : ALLOWED_ORIGIN;
-  
-  if (normalizedOrigin.startsWith(normalizedAllowed) || origin.startsWith(ALLOWED_ORIGIN)) {
-    return origin;
-  }
-  
-  return ALLOWED_ORIGIN;
-}
-
-app.use((req, res, next) => {
-  const origin = getCorsOrigin(req.headers.origin);
-  res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Access-Control-Max-Age', '86400');
-  
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-  
-  next();
-});
+app.use(corsMiddleware);
 
 app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) {
-      return callback(null, ALLOWED_ORIGIN);
-    }
-    
-    const normalizedOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin;
-    const normalizedAllowed = ALLOWED_ORIGIN.endsWith('/') ? ALLOWED_ORIGIN.slice(0, -1) : ALLOWED_ORIGIN;
-    
-    if (normalizedOrigin.startsWith(normalizedAllowed) || origin.startsWith(ALLOWED_ORIGIN)) {
-      callback(null, true);
-    } else {
-      callback(null, ALLOWED_ORIGIN);
-    }
-  },
+  origin: process.env.ALLOWED_ORIGIN || 'https://barefoot-9610.myshopify.com',
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type'],
-  credentials: false,
-  preflightContinue: false,
-  optionsSuccessStatus: 200
+  credentials: false
 }));
 
 app.use(express.json());
@@ -91,10 +51,7 @@ app.get('/address', (req, res) => {
 app.use(express.static(path.join(__dirname, 'ui')));
 
 app.use((err, req, res, next) => {
-  const origin = getCorsOrigin(req.headers.origin);
-  res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  setCorsHeaders(res, req.headers.origin);
   
   console.error('Error:', err);
   res.status(err.status || 500).json({

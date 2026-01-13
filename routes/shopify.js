@@ -4,24 +4,12 @@ const axios = require('axios');
 const logger = require('../utils/logger');
 const shopifyService = require('../services/shopify');
 const { extractOrderId, buildAddressUrl, mergeCustomerData } = require('../utils/order');
+const { corsMiddleware, setCorsHeaders } = require('../middleware/cors');
 
 const CRM_API_BASE_URL = process.env.CRM_API_URL || 'https://api.saguaro.com.ua';
-const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || 'https://barefoot-9610.myshopify.com';
 const ORDER_STORAGE_TTL = 30 * 60 * 1000;
 
 const orderStorage = new Map();
-
-function getCorsOrigin(origin) {
-  if (!origin) return ALLOWED_ORIGIN;
-  const normalizedOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin;
-  const normalizedAllowed = ALLOWED_ORIGIN.endsWith('/') ? ALLOWED_ORIGIN.slice(0, -1) : ALLOWED_ORIGIN;
-  
-  if (normalizedOrigin.startsWith(normalizedAllowed) || origin.startsWith(ALLOWED_ORIGIN)) {
-    return origin;
-  }
-  
-  return ALLOWED_ORIGIN;
-}
 
 function storeOrder(orderId, orderData) {
   orderStorage.set(orderId, orderData);
@@ -55,7 +43,12 @@ function buildCrmPayload(orderId, orderData) {
 async function sendToCrm(orderId, crmPayload) {
   const crmUrl = `${CRM_API_BASE_URL}/webhooks/shopify/orders/${orderId}/invoice`;
   
-  logger.crmRequest({ url: crmUrl, payload: crmPayload });
+  logger.crmRequest({
+    url: crmUrl,
+    method: 'POST',
+    orderId,
+    payload: crmPayload
+  });
   
   const response = await axios.post(crmUrl, crmPayload, {
     timeout: 10000,
@@ -63,10 +56,12 @@ async function sendToCrm(orderId, crmPayload) {
   });
   
   logger.crmResponse({
+    url: crmUrl,
     status: response.status,
     statusText: response.statusText,
-    headers: response.headers,
-    data: response.data
+    pageUrl: response.data?.pageUrl,
+    invoiceId: response.data?.invoiceId,
+    fullResponse: response.data
   });
   
   return response.data?.pageUrl;
@@ -84,82 +79,100 @@ async function createShopifyOrder(orderData) {
   }
 }
 
-router.options('/checkout', (req, res) => {
-  const origin = getCorsOrigin(req.headers.origin);
-  res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Access-Control-Max-Age', '86400');
-  res.status(200).json({});
-});
+router.use(corsMiddleware);
 
 router.post('/checkout', async (req, res) => {
-  const origin = getCorsOrigin(req.headers.origin);
-  res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  setCorsHeaders(res, req.headers.origin);
   
   const orderData = req.body;
+  const orderId = extractOrderId(orderData);
   
   logger.shopify({
-    rawOrderData: orderData,
-    headers: req.headers,
-    ip: req.ip
+    action: 'INCOMING_REQUEST',
+    orderId,
+    hasDeliveryAddress: !!orderData.deliveryAddress,
+    origin: req.headers.origin,
+    ip: req.ip,
+    cartItemsCount: orderData.cart?.items?.length || 0,
+    totalPrice: orderData.cart?.total_price,
+    currency: orderData.cart?.currency
   });
   
   if (!orderData.deliveryAddress) {
+    logger.shopify({
+      action: 'REDIRECT_TO_ADDRESS_FORM',
+      orderId
+    });
     return handleOrderWithoutAddress(req, res, orderData);
   }
   
-  const orderId = extractOrderId(orderData);
-  
   logger.address({
-    deliveryAddress: orderData.deliveryAddress,
-    orderId
+    orderId,
+    region: orderData.deliveryAddress.region,
+    city: orderData.deliveryAddress.city,
+    warehouseNumber: orderData.deliveryAddress.warehouseNumber,
+    fullName: orderData.deliveryAddress.fullName,
+    phone: orderData.deliveryAddress.phone
   });
-  
-  const paymentUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ&start_radio=1';
   
   try {
     const crmPayload = buildCrmPayload(orderId, orderData);
+    
+    logger.shopify({
+      action: 'SENDING_TO_CRM',
+      orderId,
+      crmUrl: `${CRM_API_BASE_URL}/webhooks/shopify/orders/${orderId}/invoice`
+    });
+    
     const pageUrl = await sendToCrm(orderId, crmPayload);
     
     if (!pageUrl) {
       logger.error('CRM_RESPONSE', new Error('No pageUrl in CRM response'));
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to get payment URL from CRM'
+      });
     }
+    
+    logger.shopify({
+      action: 'CREATING_SHOPIFY_ORDER',
+      orderId,
+      pageUrl
+    });
     
     await createShopifyOrder(orderData);
     
+    logger.shopify({
+      action: 'SUCCESS',
+      orderId,
+      pageUrl,
+      message: 'Order processed successfully, redirecting to payment'
+    });
+    
     res.status(200).json({
       success: true,
-      pageUrl: paymentUrl
+      pageUrl
     });
   } catch (error) {
     logger.error('CRM_REQUEST', error);
     
-    await createShopifyOrder(orderData).catch(() => {});
+    logger.shopify({
+      action: 'ERROR',
+      orderId,
+      error: error.message,
+      errorStack: error.stack
+    });
     
-    res.status(200).json({
-      success: true,
-      pageUrl: paymentUrl
+    res.status(500).json({
+      success: false,
+      message: 'Error processing order with CRM service',
+      error: error.message
     });
   }
 });
 
-router.options('/order/:orderId', (req, res) => {
-  const origin = getCorsOrigin(req.headers.origin);
-  res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Access-Control-Max-Age', '86400');
-  res.status(200).end();
-});
-
 router.get('/order/:orderId', (req, res) => {
-  const origin = getCorsOrigin(req.headers.origin);
-  res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  setCorsHeaders(res, req.headers.origin);
   
   const { orderId } = req.params;
   const orderData = orderStorage.get(orderId);
@@ -173,7 +186,7 @@ router.get('/order/:orderId', (req, res) => {
   
   res.status(200).json({
     success: true,
-    orderData: orderData
+    orderData
   });
 });
 

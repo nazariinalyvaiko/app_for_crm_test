@@ -1,35 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const { searchWarehouses, searchCities } = require('../services/nova-poshta');
+const { corsMiddleware, setCorsHeaders } = require('../middleware/cors');
 
-const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || 'https://barefoot-9610.myshopify.com';
-
-function getCorsOrigin(origin) {
-  if (!origin) return ALLOWED_ORIGIN;
-  const normalizedOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin;
-  const normalizedAllowed = ALLOWED_ORIGIN.endsWith('/') ? ALLOWED_ORIGIN.slice(0, -1) : ALLOWED_ORIGIN;
-  
-  if (normalizedOrigin.startsWith(normalizedAllowed) || origin.startsWith(ALLOWED_ORIGIN)) {
-    return origin;
-  }
-  
-  return ALLOWED_ORIGIN;
-}
-
-router.options('/warehouses', (req, res) => {
-  const origin = getCorsOrigin(req.headers.origin);
-  res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Access-Control-Max-Age', '86400');
-  res.status(200).end();
-});
+router.use(corsMiddleware);
 
 router.get('/warehouses', async (req, res) => {
-  const origin = getCorsOrigin(req.headers.origin);
-  res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  setCorsHeaders(res, req.headers.origin);
   
   const location = req.query.location || req.query.city;
   
@@ -53,20 +30,8 @@ router.get('/warehouses', async (req, res) => {
   }
 });
 
-router.options('/cities', (req, res) => {
-  const origin = getCorsOrigin(req.headers.origin);
-  res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Access-Control-Max-Age', '86400');
-  res.status(200).end();
-});
-
 router.get('/cities', async (req, res) => {
-  const origin = getCorsOrigin(req.headers.origin);
-  res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  setCorsHeaders(res, req.headers.origin);
   
   const query = req.query.query;
   const region = req.query.region || null;

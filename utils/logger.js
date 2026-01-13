@@ -28,28 +28,28 @@ function formatTimestamp() {
 }
 
 function writeLog(level, section, data) {
-  try {
-    const logFile = getLogFileName();
-    const timestamp = formatTimestamp();
-    const logEntry = {
-      timestamp,
-      level,
-      section,
-      data
-    };
-    
-    const logLine = JSON.stringify(logEntry, null, 2) + '\n' + '='.repeat(80) + '\n\n';
-    fs.appendFileSync(logFile, logLine, 'utf8');
-  } catch (error) {
-    console.error('Failed to write log:', error.message);
-    const timestamp = formatTimestamp();
-    const logEntry = {
-      timestamp,
-      level,
-      section,
-      data
-    };
-    console.log(JSON.stringify(logEntry, null, 2));
+  const timestamp = formatTimestamp();
+  const logEntry = {
+    timestamp,
+    level,
+    section,
+    data
+  };
+  
+  const logLine = JSON.stringify(logEntry, null, 2);
+  
+  if (isVercel) {
+    console.log(`[${level}] ${section}`);
+    console.log(logLine);
+    console.log('─'.repeat(80));
+  } else {
+    try {
+      const logFile = getLogFileName();
+      fs.appendFileSync(logFile, logLine + '\n' + '='.repeat(80) + '\n\n', 'utf8');
+    } catch (error) {
+      console.error('Failed to write log:', error.message);
+      console.log(`[${level}] ${section}:`, logLine);
+    }
   }
 }
 
