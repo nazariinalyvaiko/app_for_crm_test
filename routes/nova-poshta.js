@@ -2,13 +2,6 @@ const express = require('express');
 const router = express.Router();
 const { searchWarehouses, searchCities } = require('../services/nova-poshta');
 
-router.options('*', (req, res) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type');
-  res.sendStatus(200);
-});
-
 router.get('/warehouses', async (req, res) => {
   const location = req.query.location || req.query.city;
   

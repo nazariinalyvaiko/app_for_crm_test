@@ -5,13 +5,6 @@ const logger = require('../utils/logger');
 const shopifyService = require('../services/shopify');
 const { extractOrderId, buildAddressUrl, mergeCustomerData } = require('../utils/order');
 
-router.options('*', (req, res) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type');
-  res.sendStatus(200);
-});
-
 const CRM_API_BASE_URL = process.env.CRM_API_URL || 'https://api.saguaro.com.ua';
 const ORDER_STORAGE_TTL = 30 * 60 * 1000;
 
