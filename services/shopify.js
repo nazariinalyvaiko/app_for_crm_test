@@ -82,6 +82,10 @@ function getShopifyHeaders() {
   };
 }
 
+function getOrderItems(orderData) {
+  return orderData.cart?.items || orderData.line_items || [];
+}
+
 function validateOrderData(orderData) {
   if (!SHOPIFY_ACCESS_KEY) {
     throw new Error('SHOPIFY_ACCESS_KEY is not configured');
@@ -91,9 +95,9 @@ function validateOrderData(orderData) {
     throw new Error('Shop domain is missing');
   }
   
-  const items = orderData.cart?.items || [];
+  const items = getOrderItems(orderData);
   if (items.length === 0) {
-    throw new Error('No items in cart');
+    throw new Error('No items in order');
   }
 }
 
@@ -103,13 +107,34 @@ async function createOrder(orderData) {
   const shopDomain = orderData.shop.domain;
   const apiUrl = getShopifyApiUrl(shopDomain);
   const { cart = {}, customer = {}, deliveryAddress = {} } = orderData;
-  const items = cart.items || [];
+  const items = getOrderItems(orderData);
 
-  const lineItems = items.map(item => ({
-    variant_id: item.variant_id || item.id,
-    quantity: item.quantity || 1,
-    ...(item.price > 0 && { price: (item.price / 100).toFixed(2) })
-  }));
+  const lineItems = items.map((item, index) => {
+    const quantity = parseInt(item.quantity) || 1;
+    const variantId = item.variant_id || item.id;
+    
+    if (!variantId) {
+      throw new Error(`Line item ${index + 1} is missing variant_id or id`);
+    }
+    
+    if (quantity <= 0) {
+      throw new Error(`Line item ${index + 1} has invalid quantity: ${quantity}`);
+    }
+    
+    logger.shopify({
+      action: 'PROCESSING_LINE_ITEM',
+      variantId,
+      quantity,
+      originalQuantity: item.quantity,
+      price: item.price
+    });
+    
+    return {
+      variant_id: variantId,
+      quantity: quantity,
+      ...(item.price > 0 && { price: (item.price / 100).toFixed(2) })
+    };
+  });
 
   const orderPayload = {
     order: {
@@ -120,7 +145,7 @@ async function createOrder(orderData) {
       financial_status: 'pending',
       fulfillment_status: null,
       note: `Order created via CRM integration. Delivery: ${deliveryAddress.fullAddress || 'N/A'}`,
-      currency: cart.currency || 'UAH',
+      currency: orderData.currency || cart.currency || 'UAH',
       tags: 'crm-integration'
     }
   };
@@ -129,6 +154,8 @@ async function createOrder(orderData) {
     logger.shopify({
       action: 'CREATE_ORDER_REQUEST',
       shop: shopDomain,
+      itemsCount: lineItems.length,
+      lineItems: lineItems,
       payload: orderPayload
     });
 
@@ -149,12 +176,26 @@ async function createOrder(orderData) {
 
     return order;
   } catch (error) {
-    logger.error('SHOPIFY_CREATE_ORDER', error);
-    throw error;
+    const errorDetails = {
+      message: error.message,
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+      shop: shopDomain
+    };
+    
+    logger.error('SHOPIFY_CREATE_ORDER', {
+      ...errorDetails,
+      originalError: error
+    });
+    
+    throw new Error(
+      `Failed to create Shopify order: ${error.message}${error.response?.data?.errors ? ' - ' + JSON.stringify(error.response.data.errors) : ''}`
+    );
   }
 }
 
-async function closeOrder(shopDomain, orderId) {
+async function updateOrderStatus(shopDomain, orderId, financialStatus) {
   if (!SHOPIFY_ACCESS_KEY) {
     throw new Error('SHOPIFY_ACCESS_KEY is not configured');
   }
@@ -167,9 +208,92 @@ async function closeOrder(shopDomain, orderId) {
 
   try {
     logger.shopify({
+      action: 'UPDATE_ORDER_STATUS_REQUEST',
+      shop: shopDomain,
+      orderId: orderId,
+      financialStatus: financialStatus
+    });
+
+    const response = await axios.put(`${apiUrl}/orders/${orderId}.json`, {
+      order: {
+        id: orderId,
+        financial_status: financialStatus
+      }
+    }, {
+      headers: getShopifyHeaders(),
+      timeout: 10000
+    });
+
+    const order = response.data?.order;
+    
+    logger.shopify({
+      action: 'UPDATE_ORDER_STATUS_SUCCESS',
+      shop: shopDomain,
+      orderId: order?.id,
+      financialStatus: order?.financial_status
+    });
+
+    return order;
+  } catch (error) {
+    const errorDetails = {
+      message: error.message,
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+      shop: shopDomain,
+      orderId: orderId,
+      financialStatus: financialStatus
+    };
+    
+    logger.error('SHOPIFY_UPDATE_ORDER_STATUS', {
+      ...errorDetails,
+      originalError: error
+    });
+    
+    throw new Error(
+      `Failed to update order status: ${error.message}${error.response?.data?.errors ? ' - ' + JSON.stringify(error.response.data.errors) : ''}`
+    );
+  }
+}
+
+async function closeOrder(shopDomain, orderId, markAsPaid = true) {
+  if (!SHOPIFY_ACCESS_KEY) {
+    throw new Error('SHOPIFY_ACCESS_KEY is not configured');
+  }
+  
+  if (!shopDomain || !orderId) {
+    throw new Error('Shop domain and order ID are required');
+  }
+  
+  const apiUrl = getShopifyApiUrl(shopDomain);
+
+  try {
+    if (markAsPaid) {
+      logger.shopify({
+        action: 'MARKING_ORDER_AS_PAID_BEFORE_CLOSE',
+        shop: shopDomain,
+        orderId: orderId
+      });
+      
+      try {
+        await updateOrderStatus(shopDomain, orderId, 'paid');
+      } catch (updateError) {
+        // Якщо не вдалося оновити статус, логуємо але продовжуємо закриття
+        // щоб ордер все одно закрився (хоча інвентар може повернутися)
+        logger.error('SHOPIFY_UPDATE_STATUS_BEFORE_CLOSE', {
+          message: 'Failed to mark order as paid before close, continuing with close anyway',
+          error: updateError.message,
+          shop: shopDomain,
+          orderId: orderId
+        });
+      }
+    }
+
+    logger.shopify({
       action: 'CLOSE_ORDER_REQUEST',
       shop: shopDomain,
-      orderId: orderId
+      orderId: orderId,
+      markAsPaid: markAsPaid
     });
 
     const response = await axios.post(`${apiUrl}/orders/${orderId}/close.json`, {}, {
@@ -183,18 +307,35 @@ async function closeOrder(shopDomain, orderId) {
       action: 'CLOSE_ORDER_SUCCESS',
       shop: shopDomain,
       orderId: order?.id,
-      closed: order?.closed
+      closed: order?.closed,
+      financialStatus: order?.financial_status
     });
 
     return order;
   } catch (error) {
-    logger.error('SHOPIFY_CLOSE_ORDER', error);
-    throw error;
+    const errorDetails = {
+      message: error.message,
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+      shop: shopDomain,
+      orderId: orderId
+    };
+    
+    logger.error('SHOPIFY_CLOSE_ORDER', {
+      ...errorDetails,
+      originalError: error
+    });
+    
+    throw new Error(
+      `Failed to close Shopify order: ${error.message}${error.response?.data?.errors ? ' - ' + JSON.stringify(error.response.data.errors) : ''}`
+    );
   }
 }
 
 module.exports = {
   createOrder,
-  closeOrder
+  closeOrder,
+  updateOrderStatus
 };
 
