@@ -13,7 +13,7 @@ const buildCrmPayload = (orderId, orderData, shopifyOrderId) => {
   const payload = {
     ...rest,
     id: orderId,
-    shopifyOrderId, // Обов'язкове поле
+    shopifyOrderId,
     customer: mergeCustomerData(orderData.customer, deliveryAddress),
     deliveryAddress: address
   };
@@ -23,18 +23,11 @@ const buildCrmPayload = (orderId, orderData, shopifyOrderId) => {
 
 const sendOrderToCrm = async (payload) => {
   try {
-    const response = await axios.post(
+      const response = await axios.post(
       `${CRM_API_BASE_URL}/webhooks/shopify/orders`,
       payload,
       { timeout: REQUEST_TIMEOUT.CRM, headers: { 'Content-Type': 'application/json' } }
     );
-    
-    // Перевіряємо, чи відповідь містить pageUrl
-    const { pageUrl, invoiceId } = response.data || {};
-    if (pageUrl) {
-      return { pageUrl, invoiceId };
-    }
-    
     return response.data;
   } catch (error) {
     handleApiError(error, 'CRM', { action: 'SEND_ORDER_TO_CRM' });
@@ -88,18 +81,8 @@ router.post('/order', async (req, res) => {
     }
     
     const payload = buildCrmPayload(orderId, orderData, shopifyOrderId);
-    const crmResponse = await sendOrderToCrm(payload);
+    await sendOrderToCrm(payload);
     
-    // Якщо POST повернув pageUrl - використовуємо його
-    if (crmResponse && crmResponse.pageUrl) {
-      return res.json({ 
-        success: true, 
-        pageUrl: crmResponse.pageUrl,
-        invoiceId: crmResponse.invoiceId 
-      });
-    }
-    
-    // Якщо ні - робимо GET запит для отримання invoice
     const invoiceResponse = await getInvoiceLink(shopifyOrderId);
     
     if (!invoiceResponse || !invoiceResponse.pageUrl) {
@@ -137,18 +120,8 @@ const processOrderToCrm = async (orderData) => {
   }
   
   const payload = buildCrmPayload(orderId, orderData, shopifyOrderId);
-  const crmResponse = await sendOrderToCrm(payload);
-  
-  // Якщо POST повернув pageUrl - використовуємо його
-  if (crmResponse && crmResponse.pageUrl) {
-    return { 
-      success: true, 
-      pageUrl: crmResponse.pageUrl,
-      invoiceId: crmResponse.invoiceId 
-    };
-  }
-  
-  // Якщо ні - робимо GET запит для отримання invoice
+  await sendOrderToCrm(payload);
+
   const invoiceResponse = await getInvoiceLink(shopifyOrderId);
   
   if (!invoiceResponse || !invoiceResponse.pageUrl) {
