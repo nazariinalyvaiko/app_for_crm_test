@@ -408,7 +408,7 @@ form.addEventListener('submit', async (e) => {
                 throw new Error('No payment URL received from API');
             }
         } else {
-            window.location.href = '/checkout';
+            showErrorNotification('Дані замовлення не знайдено. Будь ласка, спробуйте ще раз.');
         }
     } catch (error) {
         console.error('Error:', error);

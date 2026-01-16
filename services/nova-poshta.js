@@ -1,258 +1,156 @@
 const axios = require('axios');
+const logger = require('../utils/logger');
+const { NOVA_POSHTA_CACHE_TTL, REQUEST_TIMEOUT } = require('../config/constants');
 
-const NOVA_POSHTA_API_URL = 'https://api.novaposhta.ua/v2.0/json/';
-
-const NOVA_POSHTA_API_KEY = process.env.NOVA_POSHTA_API_KEY || '';
-
+const API_URL = 'https://api.novaposhta.ua/v2.0/json/';
+const API_KEY = process.env.NOVA_POSHTA_API_KEY || '';
 const cache = new Map();
-const CACHE_TTL = 60 * 60 * 1000;
+
+const apiRequest = async (method, properties, timeout = REQUEST_TIMEOUT.NOVA_POSHTA) => {
+  const response = await axios.post(API_URL, {
+    apiKey: API_KEY,
+    modelName: 'Address',
+    calledMethod: method,
+    methodProperties: properties
+  }, { timeout, headers: { 'Content-Type': 'application/json' } });
+  
+  return response.data;
+};
+
+const getCached = (key) => {
+  const cached = cache.get(key);
+  if (cached && (Date.now() - cached.timestamp) < NOVA_POSHTA_CACHE_TTL) {
+    return cached.data;
+  }
+  return null;
+};
+
+const setCache = (key, data) => {
+  cache.set(key, { data, timestamp: Date.now() });
+};
 
 async function findLocationRef(location) {
   try {
-    const response = await axios.post(NOVA_POSHTA_API_URL, {
-      apiKey: NOVA_POSHTA_API_KEY,
-      modelName: 'Address',
-      calledMethod: 'getCities',
-      methodProperties: {
-        FindByString: location,
-        Limit: 5
-      }
-    }, {
-      timeout: 5000,
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    });
-    
-    if (response.data && response.data.success && response.data.data && response.data.data.length > 0) {
-      return response.data.data[0].Ref;
-    }
-    return null;
+    const data = await apiRequest('getCities', { FindByString: location, Limit: 5 });
+    return data?.success && data?.data?.length > 0 ? data.data[0].Ref : null;
   } catch (error) {
-    console.error('Error finding location Ref:', error.message);
+    logger.error('NOVA_POSHTA_FIND_LOCATION', error);
     return null;
   }
 }
 
 async function getWarehouses(location, cityRef = null) {
   try {
-    const requestBody = cityRef ? {
-      apiKey: NOVA_POSHTA_API_KEY,
-      modelName: 'Address',
-      calledMethod: 'getWarehouses',
-      methodProperties: {
-        CityRef: cityRef,
-        Limit: 500
-      }
-    } : {
-      apiKey: NOVA_POSHTA_API_KEY,
-      modelName: 'Address',
-      calledMethod: 'getWarehouses',
-      methodProperties: {
-        CityName: location,
-        Limit: 500
-      }
-    };
+    const data = await apiRequest(
+      'getWarehouses',
+      cityRef ? { CityRef: cityRef, Limit: 500 } : { CityName: location, Limit: 500 },
+      REQUEST_TIMEOUT.NOVA_POSHTA * 2
+    );
     
-    const response = await axios.post(NOVA_POSHTA_API_URL, requestBody, {
-      timeout: 10000,
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      validateStatus: function (status) {
-        return status < 500;
-      }
-    });
-    
-    const contentType = response.headers['content-type'] || '';
-    if (!contentType.includes('application/json')) {
-      throw new Error('Invalid response format from Nova Poshta API');
+    if (data?.success && Array.isArray(data.data)) {
+      return data.data
+        .map(w => ({
+          number: w.Number || w.number || '',
+          address: w.ShortAddress || w.Description || w.description || '',
+          description: w.Description || w.description || ''
+        }))
+        .filter(w => w.number && w.address);
     }
     
-    if (response.data) {
-      if (response.data.success && response.data.data && Array.isArray(response.data.data)) {
-        return response.data.data.map(warehouse => ({
-          number: warehouse.Number || warehouse.number || '',
-          address: warehouse.ShortAddress || warehouse.Description || warehouse.description || '',
-          description: warehouse.Description || warehouse.description || ''
-        })).filter(w => w.number && w.address);
-      } else if (response.data.errors && response.data.errors.length > 0) {
-        throw new Error(response.data.errors[0] || 'API returned errors');
-      }
+    if (data?.errors?.length > 0) {
+      throw new Error(data.errors[0]);
     }
     
     return [];
   } catch (error) {
-    console.error('Error getting warehouses:', error.message);
+    logger.error('NOVA_POSHTA_GET_WAREHOUSES', error);
     throw error;
   }
 }
 
 async function searchWarehouses(location) {
   const cacheKey = location.toLowerCase().trim();
-  const cached = cache.get(cacheKey);
-  
-  if (cached && (Date.now() - cached.timestamp) < CACHE_TTL) {
-    return {
-      success: true,
-      warehouses: cached.warehouses
-    };
-  }
+  const cached = getCached(cacheKey);
+  if (cached) return { success: true, warehouses: cached };
   
   try {
     const cityRef = await findLocationRef(location);
     const warehouses = await getWarehouses(location, cityRef);
-    
-    cache.set(cacheKey, {
-      warehouses: warehouses,
-      timestamp: Date.now()
-    });
-    
-    return {
-      success: true,
-      warehouses: warehouses
-    };
+    setCache(cacheKey, warehouses);
+    return { success: true, warehouses };
   } catch (error) {
-    console.error('Error searching warehouses:', error.message);
+    logger.error('NOVA_POSHTA_SEARCH_WAREHOUSES', error);
     
+    const cached = getCached(cacheKey);
     if (error.message.includes('many requests') && cached) {
-      return {
-        success: true,
-        warehouses: cached.warehouses
-      };
+      return { success: true, warehouses: cached };
     }
     
-    return {
-      success: false,
-      warehouses: [],
-      message: error.message || 'Error fetching warehouses from Nova Poshta'
-    };
+    return { success: false, warehouses: [], message: error.message };
   }
 }
 
 async function findAreaRef(regionName) {
   try {
-    const response = await axios.post(NOVA_POSHTA_API_URL, {
-      apiKey: NOVA_POSHTA_API_KEY,
-      modelName: 'Address',
-      calledMethod: 'getAreas',
-      methodProperties: {}
-    }, {
-      timeout: 5000,
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    });
-    
-    if (response.data && response.data.success && response.data.data && Array.isArray(response.data.data)) {
-      const area = response.data.data.find(a => {
-        const areaName = (a.Description || a.description || '').toLowerCase();
-        const searchName = regionName.toLowerCase();
-        return areaName.includes(searchName) || searchName.includes(areaName);
+    const data = await apiRequest('getAreas', {});
+    if (data?.success && Array.isArray(data.data)) {
+      const area = data.data.find(a => {
+        const areaName = (a.Description || '').toLowerCase();
+        return areaName.includes(regionName.toLowerCase()) || regionName.toLowerCase().includes(areaName);
       });
-      
-      if (area) {
-        return area.Ref || area.ref || null;
-      }
+      return area?.Ref || null;
     }
     return null;
   } catch (error) {
-    console.error('Error finding area Ref:', error.message);
+    logger.error('NOVA_POSHTA_FIND_AREA', error);
     return null;
   }
 }
 
 async function searchCities(query, region = null) {
   const cacheKey = `cities_${query.toLowerCase().trim()}_${region || 'all'}`;
-  const cached = cache.get(cacheKey);
-
-  if (cached && (Date.now() - cached.timestamp) < CACHE_TTL) {
-    return {
-      success: true,
-      cities: cached.cities
-    };
-  }
-
+  const cached = getCached(cacheKey);
+  if (cached) return { success: true, cities: cached };
+  
   try {
-    let areaRef = null;
-
-    if (region) {
-      areaRef = await findAreaRef(region);
-    }
+    const areaRef = region ? await findAreaRef(region) : null;
+    const methodProperties = { FindByString: query, Limit: 50 };
+    if (areaRef) methodProperties.AreaRef = areaRef;
     
-    const requestBody = {
-      apiKey: NOVA_POSHTA_API_KEY,
-      modelName: 'Address',
-      calledMethod: 'getCities',
-      methodProperties: {
-        FindByString: query,
-        Limit: 50
-      }
-    };
+    const data = await apiRequest('getCities', methodProperties);
     
-    if (areaRef) {
-      requestBody.methodProperties.AreaRef = areaRef;
-    }
-    
-    const response = await axios.post(NOVA_POSHTA_API_URL, requestBody, {
-      timeout: 5000,
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    });
-    
-    if (response.data && response.data.success && response.data.data && Array.isArray(response.data.data)) {
-      let cities = response.data.data.map(city => ({
-        name: city.Description || city.description || '',
-        ref: city.Ref || city.ref || '',
-        area: city.AreaDescription || city.areaDescription || ''
-      })).filter(c => c.name);
+    if (data?.success && Array.isArray(data.data)) {
+      let cities = data.data
+        .map(c => ({
+          name: c.Description || '',
+          ref: c.Ref || '',
+          area: c.AreaDescription || ''
+        }))
+        .filter(c => c.name);
       
       if (region && !areaRef) {
         const regionLower = region.toLowerCase();
-        cities = cities.filter(city => {
-          const cityArea = (city.area || '').toLowerCase();
-          return cityArea.includes(regionLower) || regionLower.includes(cityArea);
+        cities = cities.filter(c => {
+          const area = (c.area || '').toLowerCase();
+          return area.includes(regionLower) || regionLower.includes(area);
         });
       }
       
-      cache.set(cacheKey, {
-        cities: cities,
-        timestamp: Date.now()
-      });
-      
-      return {
-        success: true,
-        cities: cities
-      };
-    }
-
-    return {
-      success: true,
-      cities: []
-    };
-  } catch (error) {
-    console.error('Error searching cities:', error.message);
-
-    if (error.message.includes('many requests') && cached) {
-      return {
-        success: true,
-        cities: cached.cities
-      };
+      setCache(cacheKey, cities);
+      return { success: true, cities };
     }
     
-    return {
-      success: false,
-      cities: [],
-      message: error.message || 'Error searching cities'
-    };
+    return { success: true, cities: [] };
+  } catch (error) {
+    logger.error('NOVA_POSHTA_SEARCH_CITIES', error);
+    
+    const cached = getCached(cacheKey);
+    if (error.message.includes('many requests') && cached) {
+      return { success: true, cities: cached };
+    }
+    
+    return { success: false, cities: [], message: error.message };
   }
 }
 
-module.exports = {
-  searchWarehouses,
-  searchCities,
-  findLocationRef,
-  findAreaRef,
-  getWarehouses
-};
+module.exports = { searchWarehouses, searchCities };

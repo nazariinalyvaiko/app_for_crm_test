@@ -28,13 +28,6 @@ const CSP_POLICY = [
 
 app.use(corsMiddleware);
 
-app.use(cors({
-  origin: process.env.ALLOWED_ORIGIN || 'https://barefoot-9610.myshopify.com',
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type'],
-  credentials: false
-}));
-
 app.use(express.json());
 app.use((req, res, next) => {
   res.setHeader('Content-Security-Policy', CSP_POLICY);
@@ -54,7 +47,7 @@ app.use(express.static(path.join(__dirname, 'ui')));
 app.use((err, req, res, next) => {
   setCorsHeaders(res, req.headers.origin);
   
-  console.error('Error:', err);
+  logger.error('SERVER_ERROR', err);
   res.status(err.status || 500).json({
     success: false,
     message: err.message || 'Internal server error'
