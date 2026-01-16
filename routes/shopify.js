@@ -1,6 +1,5 @@
 const express = require('express');
 const router = express.Router();
-const logger = require('../utils/logger');
 const { extractOrderId, buildAddressUrl } = require('../utils/order');
 const { corsMiddleware, setCorsHeaders } = require('../middleware/cors');
 const { ORDER_STORAGE_TTL } = require('../config/constants');
@@ -23,7 +22,6 @@ router.post('/checkout', async (req, res) => {
   
   if (!orderData.deliveryAddress) {
     storeOrder(orderId, orderData);
-    logger.shopify({ action: 'STORING_ORDER_WITHOUT_ADDRESS', orderId });
     return res.json({
       success: true,
       redirectUrl: buildAddressUrl(req, orderId),
@@ -33,12 +31,8 @@ router.post('/checkout', async (req, res) => {
   
   try {
     const result = await processOrderToCrm(orderData);
-    
-    logger.shopify({ action: 'CHECKOUT_SUCCESS', orderId, invoiceId: result.invoiceId, pageUrl: result.pageUrl });
-    
     res.json(result);
   } catch (error) {
-    logger.error('CHECKOUT_ERROR', error);
     res.status(500).json({
       success: false,
       message: error.message || 'Error processing order with CRM service',
