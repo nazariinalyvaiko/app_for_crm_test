@@ -6,21 +6,17 @@ const { corsMiddleware, setCorsHeaders } = require('../middleware/cors');
 const { handleApiError } = require('../utils/errorHandler');
 const { CRM_API_BASE_URL, REQUEST_TIMEOUT } = require('../config/constants');
 
-const buildCrmPayload = (orderId, orderData) => {
+const buildCrmPayload = (orderId, orderData, shopifyOrderId) => {
   const { deliveryAddress, ...rest } = orderData;
   const { fullName, phone, ...address } = deliveryAddress || {};
-  
-  const shopifyOrderId = orderData.shopifyOrderId || orderData.shopify?.orderId || orderData.id;
   
   const payload = {
     ...rest,
     id: orderId,
+    shopifyOrderId, // Обов'язкове поле
     customer: mergeCustomerData(orderData.customer, deliveryAddress),
     deliveryAddress: address
   };
-  if (shopifyOrderId) {
-    payload.shopifyOrderId = shopifyOrderId;
-  }
   
   return payload;
 };
@@ -91,7 +87,7 @@ router.post('/order', async (req, res) => {
       });
     }
     
-    const payload = buildCrmPayload(orderId, orderData);
+    const payload = buildCrmPayload(orderId, orderData, shopifyOrderId);
     const crmResponse = await sendOrderToCrm(payload);
     
     // Якщо POST повернув pageUrl - використовуємо його
@@ -140,7 +136,7 @@ const processOrderToCrm = async (orderData) => {
     throw new Error('shopifyOrderId is required');
   }
   
-  const payload = buildCrmPayload(orderId, orderData);
+  const payload = buildCrmPayload(orderId, orderData, shopifyOrderId);
   const crmResponse = await sendOrderToCrm(payload);
   
   // Якщо POST повернув pageUrl - використовуємо його
