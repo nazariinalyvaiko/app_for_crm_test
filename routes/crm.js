@@ -19,16 +19,31 @@ const buildCrmPayload = (orderId, orderData) => {
   };
 };
 
-const sendToCrm = async (orderId, payload) => {
+const sendOrderToCrm = async (payload) => {
   try {
     const response = await axios.post(
-      `${CRM_API_BASE_URL}/webhooks/shopify/orders/${orderId}/invoice`,
+      `${CRM_API_BASE_URL}/webhooks/shopify/orders`,
       payload,
       { timeout: REQUEST_TIMEOUT.CRM, headers: { 'Content-Type': 'application/json' } }
     );
     
+    logger.crmResponse({ action: 'SEND_ORDER_TO_CRM', response: response.data });
+    return response.data;
+  } catch (error) {
+    handleApiError(error, 'CRM', { action: 'SEND_ORDER_TO_CRM' });
+    throw error;
+  }
+};
+
+const getInvoiceLink = async (shopifyOrderId) => {
+  try {
+    const response = await axios.get(
+      `${CRM_API_BASE_URL}/webhooks/shopify/orders/${shopifyOrderId}/invoice`,
+      { timeout: REQUEST_TIMEOUT.CRM, headers: { 'Content-Type': 'application/json' } }
+    );
+    
     const { pageUrl, invoiceId } = response.data || {};
-    logger.crmResponse({ orderId, invoiceId, pageUrl });
+    logger.crmResponse({ shopifyOrderId, invoiceId, pageUrl });
     
     if (!pageUrl) {
       throw new Error('CRM response missing pageUrl');
@@ -36,7 +51,7 @@ const sendToCrm = async (orderId, payload) => {
     
     return { pageUrl, invoiceId };
   } catch (error) {
-    handleApiError(error, 'CRM', { orderId });
+    handleApiError(error, 'CRM', { shopifyOrderId });
     throw error;
   }
 };
@@ -58,21 +73,33 @@ router.post('/order', async (req, res) => {
   
   try {
     const payload = buildCrmPayload(orderId, orderData);
-    const crmResponse = await sendToCrm(orderId, payload);
+    await sendOrderToCrm(payload);
     
-    if (!crmResponse || !crmResponse.pageUrl) {
+    // Get shopifyOrderId from orderData (could be in orderData.shopifyOrderId, orderData.shopify?.orderId, or orderData.id if it's a Shopify order ID)
+    const shopifyOrderId = orderData.shopifyOrderId || orderData.shopify?.orderId || orderData.id;
+    
+    if (!shopifyOrderId) {
+      return res.status(400).json({
+        success: false,
+        message: 'shopifyOrderId is required to get payment link'
+      });
+    }
+    
+    const invoiceResponse = await getInvoiceLink(shopifyOrderId);
+    
+    if (!invoiceResponse || !invoiceResponse.pageUrl) {
       return res.status(500).json({
         success: false,
         message: 'Failed to get payment URL from CRM'
       });
     }
     
-    logger.shopify({ action: 'CRM_ORDER_SUCCESS', orderId, invoiceId: crmResponse.invoiceId, pageUrl: crmResponse.pageUrl });
+    logger.shopify({ action: 'CRM_ORDER_SUCCESS', orderId, shopifyOrderId, invoiceId: invoiceResponse.invoiceId, pageUrl: invoiceResponse.pageUrl });
     
     res.json({ 
       success: true, 
-      pageUrl: crmResponse.pageUrl,
-      invoiceId: crmResponse.invoiceId 
+      pageUrl: invoiceResponse.pageUrl,
+      invoiceId: invoiceResponse.invoiceId 
     });
   } catch (error) {
     logger.error('CRM_ORDER_ERROR', error);
@@ -92,18 +119,26 @@ const processOrderToCrm = async (orderData) => {
   }
   
   const payload = buildCrmPayload(orderId, orderData);
-  const crmResponse = await sendToCrm(orderId, payload);
+  await sendOrderToCrm(payload);
   
-  if (!crmResponse || !crmResponse.pageUrl) {
+  const shopifyOrderId = orderData.shopifyOrderId || orderData.shopify?.orderId || orderData.id;
+  
+  if (!shopifyOrderId) {
+    throw new Error('shopifyOrderId is required to get payment link');
+  }
+  
+  const invoiceResponse = await getInvoiceLink(shopifyOrderId);
+  
+  if (!invoiceResponse || !invoiceResponse.pageUrl) {
     throw new Error('Failed to get payment URL from CRM');
   }
   
-  logger.shopify({ action: 'CRM_ORDER_SUCCESS', orderId, invoiceId: crmResponse.invoiceId, pageUrl: crmResponse.pageUrl });
+  logger.shopify({ action: 'CRM_ORDER_SUCCESS', orderId, shopifyOrderId, invoiceId: invoiceResponse.invoiceId, pageUrl: invoiceResponse.pageUrl });
   
   return { 
     success: true, 
-    pageUrl: crmResponse.pageUrl,
-    invoiceId: crmResponse.invoiceId 
+    pageUrl: invoiceResponse.pageUrl,
+    invoiceId: invoiceResponse.invoiceId 
   };
 };
 
