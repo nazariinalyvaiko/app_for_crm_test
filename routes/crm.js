@@ -7,13 +7,15 @@ const { handleApiError } = require('../utils/errorHandler');
 const { CRM_API_BASE_URL, REQUEST_TIMEOUT } = require('../config/constants');
 
 const buildCrmPayload = (orderId, orderData, shopifyOrderId) => {
-  const { deliveryAddress, ...rest } = orderData;
+  const { deliveryAddress, shopifyOrderId: _shopifyId, shopify, id: _originalId, ...rest } = orderData;
   const { fullName, phone, ...address } = deliveryAddress || {};
+  
+  const shopifyId = shopifyOrderId ? (Number(shopifyOrderId) || shopifyOrderId) : null;
   
   const payload = {
     ...rest,
     id: orderId,
-    shopifyOrderId,
+    shopifyOrderId: shopifyId,
     customer: mergeCustomerData(orderData.customer, deliveryAddress),
     deliveryAddress: address
   };
@@ -80,10 +82,12 @@ router.post('/order', async (req, res) => {
       });
     }
     
+    const shopifyIdForUrl = String(shopifyOrderId);
+    
     const payload = buildCrmPayload(orderId, orderData, shopifyOrderId);
     await sendOrderToCrm(payload);
     
-    const invoiceResponse = await getInvoiceLink(shopifyOrderId);
+    const invoiceResponse = await getInvoiceLink(shopifyIdForUrl);
     
     if (!invoiceResponse || !invoiceResponse.pageUrl) {
       return res.status(500).json({
@@ -119,10 +123,12 @@ const processOrderToCrm = async (orderData) => {
     throw new Error('shopifyOrderId is required');
   }
   
+  const shopifyIdForUrl = String(shopifyOrderId);
+  
   const payload = buildCrmPayload(orderId, orderData, shopifyOrderId);
   await sendOrderToCrm(payload);
 
-  const invoiceResponse = await getInvoiceLink(shopifyOrderId);
+  const invoiceResponse = await getInvoiceLink(shopifyIdForUrl);
   
   if (!invoiceResponse || !invoiceResponse.pageUrl) {
     throw new Error('Failed to get payment URL from CRM');
