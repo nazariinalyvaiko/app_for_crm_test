@@ -11,26 +11,43 @@ const buildCrmPayload = (orderId, orderData) => {
   const { deliveryAddress, ...rest } = orderData;
   const { fullName, phone, ...address } = deliveryAddress || {};
   
-  return {
+  const shopifyOrderId = orderData.shopifyOrderId || orderData.shopify?.orderId || orderData.id;
+  
+  const payload = {
     ...rest,
     id: orderId,
     customer: mergeCustomerData(orderData.customer, deliveryAddress),
     deliveryAddress: address
   };
+  if (shopifyOrderId) {
+    payload.shopifyOrderId = shopifyOrderId;
+  }
+  
+  return payload;
 };
 
 const sendOrderToCrm = async (payload) => {
   try {
+    logger.shopify({ action: 'SENDING_ORDER_TO_CRM', payload: JSON.stringify(payload, null, 2) });
+    
     const response = await axios.post(
       `${CRM_API_BASE_URL}/webhooks/shopify/orders`,
       payload,
       { timeout: REQUEST_TIMEOUT.CRM, headers: { 'Content-Type': 'application/json' } }
     );
     
-    logger.crmResponse({ action: 'SEND_ORDER_TO_CRM', response: response.data });
+    logger.crmResponse({ action: 'SEND_ORDER_TO_CRM_SUCCESS', response: response.data });
     return response.data;
   } catch (error) {
-    handleApiError(error, 'CRM', { action: 'SEND_ORDER_TO_CRM' });
+    const errorDetails = {
+      message: error.message,
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+      payload: payload
+    };
+    logger.error('CRM_SEND_ORDER_ERROR', errorDetails);
+    handleApiError(error, 'CRM', { action: 'SEND_ORDER_TO_CRM', payload });
     throw error;
   }
 };
@@ -74,8 +91,7 @@ router.post('/order', async (req, res) => {
   try {
     const payload = buildCrmPayload(orderId, orderData);
     await sendOrderToCrm(payload);
-    
-    // Get shopifyOrderId from orderData (could be in orderData.shopifyOrderId, orderData.shopify?.orderId, or orderData.id if it's a Shopify order ID)
+
     const shopifyOrderId = orderData.shopifyOrderId || orderData.shopify?.orderId || orderData.id;
     
     if (!shopifyOrderId) {

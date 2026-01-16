@@ -19,13 +19,17 @@ const handleShopifyError = (error, context = {}) => {
 };
 
 const handleApiError = (error, serviceName, context = {}) => {
-  logger.error(`${serviceName}_ERROR`, {
+  const errorData = {
     message: error.message,
     status: error.response?.status,
+    statusText: error.response?.statusText,
     data: error.response?.data,
-    ...context,
-    originalError: error
-  });
+    url: error.config?.url,
+    method: error.config?.method,
+    ...context
+  };
+  
+  logger.error(`${serviceName}_ERROR`, errorData);
   throw error;
 };
 
