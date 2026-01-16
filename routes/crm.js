@@ -1,26 +1,16 @@
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
-const { extractOrderId, mergeCustomerData } = require('../utils/order');
 const { corsMiddleware, setCorsHeaders } = require('../middleware/cors');
 const { handleApiError } = require('../utils/errorHandler');
 const { CRM_API_BASE_URL, REQUEST_TIMEOUT } = require('../config/constants');
 
-const buildCrmPayload = (orderId, orderData, shopifyOrderId) => {
-  const { deliveryAddress, shopifyOrderId: _shopifyId, shopify, id: _originalId, ...rest } = orderData;
-  const { fullName, phone, ...address } = deliveryAddress || {};
+const buildCrmPayload = (shopifyOrderId) => {
+  const shopifyId = shopifyOrderId ? (Number(shopifyOrderId) || shopifyOrderId) : shopifyOrderId;
   
-  const shopifyId = shopifyOrderId ? (Number(shopifyOrderId) || shopifyOrderId) : null;
-  
-  const payload = {
-    ...rest,
-    id: orderId,
-    shopifyOrderId: shopifyId,
-    customer: mergeCustomerData(orderData.customer, deliveryAddress),
-    deliveryAddress: address
+  return {
+    shopifyOrderId: shopifyId
   };
-  
-  return payload;
 };
 
 const sendOrderToCrm = async (payload) => {
@@ -63,14 +53,6 @@ router.post('/order', async (req, res) => {
   setCorsHeaders(res, req.headers.origin);
   
   const orderData = req.body;
-  const orderId = extractOrderId(orderData);
-  
-  if (!orderData.deliveryAddress) {
-    return res.status(400).json({
-      success: false,
-      message: 'Delivery address is required'
-    });
-  }
   
   try {
     const shopifyOrderId = orderData.shopifyOrderId || orderData.shopify?.orderId || orderData.id;
@@ -84,7 +66,8 @@ router.post('/order', async (req, res) => {
     
     const shopifyIdForUrl = String(shopifyOrderId);
     
-    const payload = buildCrmPayload(orderId, orderData, shopifyOrderId);
+    // POST вебхук - передаємо тільки shopifyOrderId
+    const payload = buildCrmPayload(shopifyOrderId);
     await sendOrderToCrm(payload);
     
     const invoiceResponse = await getInvoiceLink(shopifyIdForUrl);
@@ -111,12 +94,6 @@ router.post('/order', async (req, res) => {
 });
 
 const processOrderToCrm = async (orderData) => {
-  const orderId = extractOrderId(orderData);
-  
-  if (!orderData.deliveryAddress) {
-    throw new Error('Delivery address is required');
-  }
-  
   const shopifyOrderId = orderData.shopifyOrderId || orderData.shopify?.orderId || orderData.id;
   
   if (!shopifyOrderId) {
@@ -125,7 +102,8 @@ const processOrderToCrm = async (orderData) => {
   
   const shopifyIdForUrl = String(shopifyOrderId);
   
-  const payload = buildCrmPayload(orderId, orderData, shopifyOrderId);
+  // POST вебхук - передаємо тільки shopifyOrderId
+  const payload = buildCrmPayload(shopifyOrderId);
   await sendOrderToCrm(payload);
 
   const invoiceResponse = await getInvoiceLink(shopifyIdForUrl);
