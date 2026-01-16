@@ -31,7 +31,6 @@ router.post('/checkout', async (req, res) => {
     });
   }
   
-  // Відправляємо до CRM
   try {
     const result = await processOrderToCrm(orderData);
     

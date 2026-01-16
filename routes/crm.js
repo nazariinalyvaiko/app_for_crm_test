@@ -84,7 +84,6 @@ router.post('/order', async (req, res) => {
   }
 });
 
-// Експортуємо функції для використання в інших модулях
 const processOrderToCrm = async (orderData) => {
   const orderId = extractOrderId(orderData);
   
